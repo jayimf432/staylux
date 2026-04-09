@@ -1,0 +1,377 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  GUEST
+  HOST
+  ADMIN
+}
+
+enum PropertyType {
+  VILLA
+  APARTMENT
+  CABIN
+  TREEHOUSE
+  BEACHFRONT
+  MANSION
+  TINY_HOME
+  BOAT
+}
+
+enum Amenity {
+  WIFI
+  POOL
+  HOT_TUB
+  KITCHEN
+  PARKING
+  GYM
+  PET_FRIENDLY
+  AIR_CONDITIONING
+  HEATING
+  WASHER
+  DRYER
+  TV
+  FIREPLACE
+  BALCONY
+  BEACH_ACCESS
+  SKI_IN_SKI_OUT
+  EV_CHARGER
+  SECURITY_CAMERAS
+  SMOKE_ALARM
+  CARBON_MONOXIDE_ALARM
+  FIRST_AID_KIT
+  FIRE_EXTINGUISHER
+  WORKSPACE
+  BBQ_GRILL
+  OUTDOOR_DINING
+  GAME_ROOM
+  BABY_GEAR
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum CancellationPolicy {
+  FLEXIBLE
+  MODERATE
+  STRICT
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  NEW_MESSAGE
+  REVIEW_RECEIVED
+  PAYOUT_SENT
+  LISTING_APPROVED
+  REVIEW_RESPONSE
+  BOOKING_REQUEST
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth Models (NextAuth.js v5 / Auth.js Prisma Adapter)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  emailVerified  DateTime?
+  image          String?
+  hashedPassword String?
+  role           Role      @default(GUEST)
+  bio            String?
+  phone          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  listings      Listing[]
+  bookings      Booking[]      @relation("GuestBookings")
+  reviewsGiven  Review[]       @relation("ReviewAuthor")
+  favorites     Favorite[]
+  sentMessages  Message[]      @relation("MessageSender")
+  receivedMessages Message[]   @relation("MessageReceiver")
+  notifications Notification[]
+  hostReviews   HostReview[]   @relation("HostReviewAuthor")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expires   DateTime
+  createdAt DateTime @default(now())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core Models
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Listing {
+  id          String       @id @default(cuid())
+  title       String
+  description String       @db.Text
+  slug        String       @unique
+  propertyType PropertyType
+
+  // Pricing
+  pricePerNight Decimal @db.Decimal(10, 2)
+  cleaningFee   Decimal @db.Decimal(10, 2) @default(0)
+  serviceFee    Decimal @db.Decimal(10, 2) @default(0)
+
+  // Capacity
+  maxGuests  Int
+  bedrooms   Int
+  bathrooms  Int
+  beds       Int
+
+  // Media
+  images String[]
+
+  // Amenities
+  amenities Amenity[]
+
+  // Location
+  address   String
+  city      String
+  state     String
+  country   String
+  zipCode   String
+  latitude  Float
+  longitude Float
+
+  // Settings
+  isActive           Boolean            @default(true)
+  isFeatured         Boolean            @default(false)
+  instantBook        Boolean            @default(false)
+  cancellationPolicy CancellationPolicy @default(MODERATE)
+
+  // Computed / Cached
+  avgRating    Float @default(0)
+  totalReviews Int   @default(0)
+
+  // Relations
+  hostId   String
+  host     User      @relation(fields: [hostId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+  reviews  Review[]
+  favorites Favorite[]
+
+  // Blocked dates
+  blockedDates BlockedDate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city, country])
+  @@index([propertyType])
+  @@index([pricePerNight])
+  @@index([avgRating])
+  @@index([isFeatured])
+  @@index([hostId])
+}
+
+model BlockedDate {
+  id        String   @id @default(cuid())
+  listingId String
+  date      DateTime @db.Date
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, date])
+  @@index([listingId])
+}
+
+model Booking {
+  id       String @id @default(cuid())
+  checkIn  DateTime @db.Date
+  checkOut DateTime @db.Date
+
+  // Guests
+  adults   Int @default(1)
+  children Int @default(0)
+  infants  Int @default(0)
+  pets     Int @default(0)
+
+  // Pricing breakdown
+  totalNights  Int
+  subtotal     Decimal @db.Decimal(10, 2)
+  cleaningFee  Decimal @db.Decimal(10, 2)
+  serviceFee   Decimal @db.Decimal(10, 2)
+  taxes        Decimal @db.Decimal(10, 2)
+  totalPrice   Decimal @db.Decimal(10, 2)
+
+  // Status & Payment
+  status                BookingStatus @default(PENDING)
+  stripePaymentIntentId String?
+  stripeSessionId       String?
+  specialRequests       String?       @db.Text
+
+  // Relations
+  guestId   String
+  guest     User    @relation("GuestBookings", fields: [guestId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  review Review?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([guestId])
+  @@index([listingId])
+  @@index([status])
+  @@index([checkIn, checkOut])
+}
+
+model Review {
+  id      String @id @default(cuid())
+  rating  Int    // 1-5
+  comment String @db.Text
+
+  // Sub-ratings 1-5
+  cleanliness   Int
+  accuracy      Int
+  checkIn       Int
+  communication Int
+  location      Int
+  value         Int
+
+  // Host response
+  hostResponse          String?  @db.Text
+  hostResponseCreatedAt DateTime?
+
+  // Relations
+  authorId  String
+  author    User    @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bookingId String  @unique
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([listingId])
+  @@index([authorId])
+  @@index([rating])
+}
+
+model HostReview {
+  id      String @id @default(cuid())
+  rating  Int    // 1-5
+  comment String @db.Text
+
+  authorId String
+  author   User   @relation("HostReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  guestId  String
+
+  createdAt DateTime @default(now())
+
+  @@index([guestId])
+  @@index([authorId])
+}
+
+model Favorite {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, listingId])
+  @@index([userId])
+}
+
+model Message {
+  id        String  @id @default(cuid())
+  content   String  @db.Text
+  read      Boolean @default(false)
+
+  senderId    String
+  sender      User    @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User    @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  listingId   String?
+
+  // Conversation grouping
+  conversationId String
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+model Notification {
+  id      String           @id @default(cuid())
+  type    NotificationType
+  title   String
+  message String
+  read    Boolean          @default(false)
+  link    String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+}
